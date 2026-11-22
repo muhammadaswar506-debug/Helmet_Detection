@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HelmetGuard AI — Deteksi Helm Real-Time</title>
+
+  <!-- TensorFlow.js, COCO-SSD & Teachable Machine -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.6/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0b1120;
+      --surface: #111827;
+      --surface-2: #1f2937;
+      --border: #374151;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    [data-theme="light"] {
+      --bg: #f1f5f9;
+      --surface: #ffffff;
+      --surface-2: #f8fafc;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #059669;
+      --danger: #dc2626;
+      --warning: #d97706;
+      --shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; transition: background 0.25s, color 0.25s; }
+
+    /* Navbar */
+    header {
+      position: sticky; top: 0; z-index: 50;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    }
+    .brand { display: flex; align-items: center; gap: 0.65rem; font-weight: 700; font-size: 1.1rem; }
+    .brand-icon {
+      width: 34px; height: 34px; border-radius: 8px; background: var(--primary); color: #fff;
+      display: grid; place-items: center; font-size: 1.1rem;
+    }
+    .badge-mode {
+      font-size: 0.72rem; padding: 0.2rem 0.55rem; border-radius: 999px; font-weight: 600;
+      background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid var(--warning);
+    }
+    .badge-mode.custom {
+      background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: var(--success);
+    }
+
+    .nav-actions { display: flex; align-items: center; gap: 0.5rem; }
+    .hamburger {
+      display: none; background: transparent; border: 1px solid var(--border); color: var(--text);
+      padding: 0.45rem 0.6rem; border-radius: 8px; cursor: pointer;
+    }
+
+    /* Buttons & Inputs */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.55rem 0.95rem; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text); font-size: 0.88rem; font-weight: 600;
+      cursor: pointer; transition: 0.2s;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--primary); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .btn-success { background: var(--success); border-color: var(--success); color: #fff; }
+
+    /* Main Layout */
+    main {
+      max-width: 1400px; margin: 0 auto; padding: 1.25rem;
+      display: grid; grid-template-columns: 1fr 360px; gap: 1.25rem;
+    }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 1rem; box-shadow: var(--shadow);
+    }
+    .card-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem;
+    }
+    .stat-box {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 0.75rem; display: flex; flex-direction: column; gap: 0.2rem;
+    }
+    .stat-label { font-size: 0.75rem; color: var(--text-muted); }
+    .stat-value { font-size: 1.45rem; font-weight: 800; }
+    .stat-value.ok { color: var(--success); }
+    .stat-value.err { color: var(--danger); }
+
+    /* Viewport Canvas */
+    .viewport-wrap {
+      position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000;
+      border-radius: 12px; overflow: hidden; border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+    }
+    #sourceVideo, #sourceImage { display: none; }
+    #outputCanvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+    .overlay-status {
+      position: absolute; inset: 0; background: rgba(11, 17, 32, 0.82);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 1.5rem; gap: 0.75rem; color: #fff;
+    }
+    .overlay-status.hidden { display: none; }
+    .spinner {
+      width: 38px; height: 38px; border: 4px solid rgba(255,255,255,0.2);
+      border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .fps-pill {
+      position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.65); color: #fff;
+      padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-family: monospace;
+    }
+    .alert-banner {
+      position: absolute; top: 10px; right: 10px; background: var(--danger); color: #fff;
+      padding: 0.35rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 700;
+      display: none; animation: pulse 1s infinite;
+    }
+    .alert-banner.active { display: block; }
+    @keyframes pulse { 50% { opacity: 0.6; } }
+
+    /* Controls Bar */
+    .controls-bar {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; align-items: center;
+    }
+
+    /* Sidebar Panel */
+    .sidebar { display: flex; flex-direction: column; gap: 1rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.85rem; }
+    .form-group label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; display: flex; justify-content: space-between; }
+    input[type="text"], input[type="range"] { width: 100%; }
+    input[type="text"] {
+      padding: 0.55rem 0.75rem; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text); font-size: 0.84rem;
+    }
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.45rem 0; font-size: 0.86rem; border-bottom: 1px solid var(--border);
+    }
+
+    /* Logs */
+    .log-list {
+      max-height: 290px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .log-item {
+      display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem;
+      background: var(--surface-2); border-radius: 8px; border-left: 3px solid var(--danger);
+      font-size: 0.8rem;
+    }
+    .log-item img { width: 52px; height: 38px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+    .log-meta { flex: 1; }
+    .log-time { font-size: 0.72rem; color: var(--text-muted); }
+
+    .info-note {
+      font-size: 0.78rem; color: var(--text-muted); line-height: 1.45;
+      background: var(--surface-2); padding: 0.65rem; border-radius: 8px; border: 1px dashed var(--border);
+    }
+
+    /* Mobile Responsive + Collapsible Drawer */
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .hamburger { display: inline-flex; }
+      .nav-actions {
+        display: none; position: absolute; top: 100%; left: 0; right: 0;
+        background: var(--surface); border-bottom: 1px solid var(--border);
+        padding: 0.85rem 1.25rem; flex-direction: column; align-items: stretch;
+      }
+      .nav-actions.open { display: flex; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-icon">⛑️</div>
+    <div>
+      <div>HelmetGuard AI</div>
+      <span id="modeBadge" class="badge-mode">Mode Demo (COCO-SSD)</span>
+    </div>
+  </div>
+
+  <button class="hamburger" id="menuBtn" aria-label="Menu">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </button>
+
+  <div class="nav-actions" id="navActions">
+    <button class="btn" id="themeBtn">☀️ Tema Terang</button>
+    <button class="btn" id="exportCsvBtn">📥 Ekspor Log CSV</button>
+    <button class="btn" id="clearLogBtn">🗑️ Bersihkan Log</button>
+  </div>
+</header>
+
+<main>
+  <!-- Kolom Utama: Kamera & Deteksi -->
+  <section class="card">
+    <div class="stats-grid">
+      <div class="stat-box">
+        <span class="stat-label">Total Orang</span>
+        <span class="stat-value" id="statTotal">0</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Pakai Helm</span>
+        <span class="stat-value ok" id="statHelmet">0</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Tanpa Helm</span>
+        <span class="stat-value err" id="statNoHelmet">0</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Kepatuhan</span>
+        <span class="stat-value" id="statRate">100%</span>
+      </div>
+    </div>
+
+    <div class="viewport-wrap">
+      <video id="sourceVideo" playsinline muted></video>
+      <img id="sourceImage" alt="Preview" />
+      <canvas id="outputCanvas"></canvas>
+
+      <div class="fps-pill" id="fpsPill">FPS: 0</div>
+      <div class="alert-banner" id="alertBanner">⚠️ PELANGGARAN: TANPA HELM TERDETEKSI</div>
+
+      <div class="overlay-status" id="overlayStatus">
+        <div class="spinner" id="loaderSpin"></div>
+        <div id="statusText">Memuat AI TensorFlow.js (COCO-SSD)...</div>
+      </div>
+    </div>
+
+    <div class="controls-bar">
+      <button class="btn btn-primary" id="startCamBtn" disabled>📷 Mulai Kamera</button>
+      <button class="btn btn-danger" id="stopBtn" disabled>⏹️ Stop</button>
+      <button class="btn" id="switchCamBtn" disabled>🔄 Ganti Kamera</button>
+      <button class="btn" id="snapshotBtn" disabled>📸 Ambil Foto</button>
+
+      <label class="btn" style="margin-left:auto;">
+        🖼️ Uji Gambar
+        <input type="file" id="imageUpload" accept="image/*" hidden />
+      </label>
+      <label class="btn">
+        🎬 Uji Video
+        <input type="file" id="videoUpload" accept="video/*" hidden />
+      </label>
+    </div>
+  </section>
+
+  <!-- Kolom Samping: Pengaturan AI & Log Pelanggaran -->
+  <aside class="sidebar">
+    <div class="card">
+      <div class="card-title">🧠 Pengaturan Model AI</div>
+
+      <div class="form-group">
+        <label>URL Model Teachable Machine / Folder GitHub</label>
+        <input type="text" id="modelUrlInput" placeholder="https://teachablemachine.withgoogle.com/models/XXXX/ atau ./model/" />
+        <button class="btn btn-success" id="loadCustomBtn" style="margin-top:0.35rem;">Muat Model Custom</button>
+      </div>
+
+      <div class="info-note" style="margin-bottom:0.85rem;">
+        <strong>Info Akurasi:</strong> Saat ini sistem memakai detektor orang COCO-SSD + heuristik area kepala untuk demo instan. Untuk akurasi tinggi (95%+), tempel URL model <em>Teachable Machine</em> (kelas: <code>Helm</code> &amp; <code>Tanpa Helm</code>) di atas.
+      </div>
+
+      <div class="form-group">
+        <label>Sensitivitas Deteksi <span id="confVal">55%</span></label>
+        <input type="range" id="confSlider" min="30" max="90" value="55" />
+      </div>
+
+      <div class="toggle-row">
+        <span>🔊 Alarm Suara Pelanggaran</span>
+        <input type="checkbox" id="soundToggle" checked />
+      </div>
+      <div class="toggle-row">
+        <span>📸 Auto-Capture Pelanggar</span>
+        <input type="checkbox" id="autoCapToggle" checked />
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span>🚨 Log Pelanggaran</span>
+        <span id="logCount" style="font-size:0.8rem; color:var(--text-muted);">0 data</span>
+      </div>
+      <div class="log-list" id="logList">
+        <div style="font-size:0.82rem; color:var(--text-muted); text-align:center; padding:1rem 0;">
+          Belum ada pelanggaran tercatat.
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- Offscreen Canvas untuk cropping area kepala (224x224) -->
+<canvas id="cropCanvas" width="224" height="224" style="display:none;"></canvas>
+
+<script>
+  // ====== State Aplikasi ======
+  let personModel = null;
+  let customHelmetModel = null;
+  let isRunning = false;
+  let stream = null;
+  let facingMode = 'environment'; // Default kamera belakang di HP
+  let animId = null;
+  let lastFrameTime = performance.now();
+  let lastAlertTime = 0;
+  let violationLogs = [];
+  let audioCtx = null;
+
+  // ====== DOM Elements ======
+  const video = document.getElementById('sourceVideo');
+  const imgEl = document.getElementById('sourceImage');
+  const canvas = document.getElementById('outputCanvas');
+  const ctx = canvas.getContext('2d');
+  const cropCanvas = document.getElementById('cropCanvas');
+  const cropCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
+
+  const overlayStatus = document.getElementById('overlayStatus');
+  const loaderSpin = document.getElementById('loaderSpin');
+  const statusText = document.getElementById('statusText');
+  const fpsPill = document.getElementById('fpsPill');
+  const alertBanner = document.getElementById('alertBanner');
+  const modeBadge = document.getElementById('modeBadge');
+
+  const startCamBtn = document.getElementById('startCamBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const switchCamBtn = document.getElementById('switchCamBtn');
+  const snapshotBtn = document.getElementById('snapshotBtn');
+  const confSlider = document.getElementById('confSlider');
+  const confVal = document.getElementById('confVal');
+  const soundToggle = document.getElementById('soundToggle');
+  const autoCapToggle = document.getElementById('autoCapToggle');
+
+  // ====== Tema & Hamburger Menu ======
+  const themeBtn = document.getElementById('themeBtn');
+  const savedTheme = localStorage.getItem('hg_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  themeBtn.textContent = savedTheme === 'dark' ? '☀️ Tema Terang' : '🌙 Tema Gelap';
+
+  themeBtn.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('hg_theme', next);
+    themeBtn.textContent = next === 'dark' ? '☀️ Tema Terang' : '🌙 Tema Gelap';
+  });
+
+  document.getElementById('menuBtn').addEventListener('click', () => {
+    document.getElementById('navActions').classList.toggle('open');
+  });
+
+  confSlider.addEventListener('input', () => {
+    confVal.textContent = `${confSlider.value}%`;
+  });
+
+  // ====== Inisialisasi Model Utama (COCO-SSD) ======
+  async function initAI() {
+    try {
+      await tf.ready();
+      personModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+      loaderSpin.style.display = 'none';
+      statusText.textContent = 'AI Siap! Klik "Mulai Kamera" atau unggah Gambar/Video.';
+      startCamBtn.disabled = false;
+
+      // Auto-load jika ada folder ./model/model.json di GitHub Pages
+      try {
+        const res = await fetch('./model/model.json', { method: 'HEAD' });
+        if (res.ok) {
+          document.getElementById('modelUrlInput').value = './model/';
+          await loadCustomModel('./model/');
+        }
+      } catch (_) {}
+    } catch (err) {
+      loaderSpin.style.display = 'none';
+      statusText.textContent = 'Gagal memuat TensorFlow.js. Periksa koneksi internet Anda.';
+      console.error(err);
+    }
+  }
+
+  // ====== Muat Model Custom (Teachable Machine / TFJS) ======
+  async function loadCustomModel(rawUrl) {
+    let url = rawUrl.trim();
+    if (!url) return alert('Masukkan URL model Teachable Machine atau path folder ./model/');
+    if (!url.endsWith('/')) url += '/';
+
+    const btn = document.getElementById('loadCustomBtn');
+    btn.disabled = true;
+    btn.textContent = 'Memuat Model...';
+
+    try {
+      customHelmetModel = await tmImage.load(url + 'model.json', url + 'metadata.json');
+      modeBadge.textContent = 'Mode AI Custom Aktif ✓';
+      modeBadge.classList.add('custom');
+      alert('Model deteksi helm custom berhasil dimuat!');
+    } catch (err) {
+      alert('Gagal memuat model. Pastikan URL valid dan memiliki model.json & metadata.json.');
+      console.error(err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Muat Model Custom';
+    }
+  }
+
+  document.getElementById('loadCustomBtn').addEventListener('click', () => {
+    loadCustomModel(document.getElementById('modelUrlInput').value);
+  });
+
+  // ====== Klasifikasi Area Kepala ======
+  async function classifyHeadRegion(sourceEl, bbox) {
+    const [x, y, w, h] = bbox;
+    // Ambil 38% bagian atas tubuh (area kepala)
+    const hx = Math.max(0, x + w * 0.08);
+    const hy = Math.max(0, y);
+    const hw = Math.max(24, w * 0.84);
+    const hh = Math.max(24, Math.min(h * 0.38, w * 1.15));
+
+    cropCtx.clearRect(0, 0, 224, 224);
+    cropCtx.drawImage(sourceEl, hx, hy, hw, hh, 0, 0, 224, 224);
+
+    // 1. Jika Model Custom (Teachable Machine) aktif
+    if (customHelmetModel) {
+      const preds = await customHelmetModel.predict(cropCanvas);
+      preds.sort((a, b) => b.probability - a.probability);
+      const top = preds[0];
+      const labelLower = top.className.toLowerCase();
+      const isNoHelmet = /tanpa|tidak|no[\s_-]?helm|without/.test(labelLower);
+      return {
+        hasHelmet: !isNoHelmet,
+        confidence: top.probability,
+        label: isNoHelmet ? 'TANPA HELM' : 'PAKAI HELM',
+        headBox: [hx, hy, hw, hh]
+      };
+    }
+
+    // 2. Mode Demo Heuristik (Analisis warna/permukaan helm di bagian atas kepala)
+    const imgData = cropCtx.getImageData(40, 15, 144, 90).data;
+    let helmetLikePixels = 0;
+    let totalPixels = imgData.length / 4;
+
+    for (let i = 0; i < imgData.length; i += 4) {
+      const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const sat = max === 0 ? 0 : (max - min) / max;
+      const bright = max / 255;
+
+      // Deteksi warna cerah/solid khas helm proyek/motor (kuning, putih terang, merah, biru, oranye)
+      const isBrightWhite = bright > 0.78 && sat < 0.18;
+      const isVividColor = sat > 0.48 && bright > 0.45;
+      if (isBrightWhite || isVividColor) helmetLikePixels++;
+    }
+
+    const ratio = helmetLikePixels / totalPixels;
+    const hasHelmet = ratio > 0.32;
+    return {
+      hasHelmet,
+      confidence: Math.min(0.95, Math.max(0.55, hasHelmet ? 0.5 + ratio : 0.9 - ratio)),
+      label: hasHelmet ? 'HELM (DEMO)' : 'TANPA HELM (DEMO)',
+      headBox: [hx, hy, hw, hh]
+    };
+  }
+
+  // ====== Proses Deteksi 1 Frame ======
+  async function detectFrame(sourceEl, srcWidth, srcHeight) {
+    if (!personModel || !srcWidth || !srcHeight) return;
+
+    canvas.width = srcWidth;
+    canvas.height = srcHeight;
+    ctx.drawImage(sourceEl, 0, 0, srcWidth, srcHeight);
+
+    const minScore = parseInt(confSlider.value, 10) / 100;
+    const predictions = await personModel.detect(sourceEl);
+    const people = predictions.filter(p => p.class === 'person' && p.score >= minScore);
+
+    let helmetCount = 0;
+    let noHelmetCount = 0;
+
+    for (const person of people) {
+      const res = await classifyHeadRegion(sourceEl, person.bbox);
+      const [px, py, pw, ph] = person.bbox;
+      const [hx, hy, hw, hh] = res.headBox;
+      const color = res.hasHelmet ? '#10b981' : '#ef4444';
+
+      if (res.hasHelmet) helmetCount++;
+      else noHelmetCount++;
+
+      // Kotak tubuh (garis tipis transparan)
+      ctx.strokeStyle = color + '88';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, pw, ph);
+
+      // Kotak area kepala (garis tegas)
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3.5;
+      ctx.strokeRect(hx, hy, hw, hh);
+
+      // Label badge
+      const text = `${res.label} ${Math.round(res.confidence * 100)}%`;
+      ctx.font = 'bold 14px Segoe UI, sans-serif';
+      const textW = ctx.measureText(text).width + 12;
+      const labelY = Math.max(22, hy - 6);
+      ctx.fillStyle = color;
+      ctx.fillRect(hx, labelY - 20, textW, 22);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(text, hx + 6, labelY - 4);
+    }
+
+    // Update Statistik
+    const total = people.length;
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statHelmet').textContent = helmetCount;
+    document.getElementById('statNoHelmet').textContent = noHelmetCount;
+    document.getElementById('statRate').textContent = total === 0 ? '100%' : `${Math.round((helmetCount / total) * 100)}%`;
+
+    // Trigger Alert & Auto-Capture (cooldown 4 detik)
+    if (noHelmetCount > 0) {
+      alertBanner.classList.add('active');
+      const now = Date.now();
+      if (now - lastAlertTime > 4000) {
+        lastAlertTime = now;
+        if (soundToggle.checked) playBeep();
+        if (autoCapToggle.checked) recordViolation(noHelmetCount);
+      }
+    } else {
+      alertBanner.classList.remove('active');
+    }
+  }
+
+  // ====== Loop Kamera / Video ======
+  async function processLoop() {
+    if (!isRunning) return;
+    if (video.readyState >= 2 && !video.paused && !video.ended) {
+      await detectFrame(video, video.videoWidth, video.videoHeight);
+      const now = performance.now();
+      const fps = Math.round(1000 / Math.max(1, now - lastFrameTime));
+      lastFrameTime = now;
+      fpsPill.textContent = `FPS: ${fps}`;
+    }
+    animId = requestAnimationFrame(processLoop);
+  }
+
+  // ====== Kontrol Kamera ======
+  async function startCamera() {
+    stopAll();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      overlayStatus.classList.add('hidden');
+      isRunning = true;
+      stopBtn.disabled = false;
+      switchCamBtn.disabled = false;
+      snapshotBtn.disabled = false;
+      processLoop();
+    } catch (err) {
+      alert('Tidak dapat mengakses kamera. Pastikan izin kamera diberikan dan web dibuka lewat HTTPS (GitHub Pages).');
+      console.error(err);
+    }
+  }
+
+  function stopAll() {
+    isRunning = false;
+    if (animId) cancelAnimationFrame(animId);
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.pause();
+    video.srcObject = null;
+    video.removeAttribute('src');
+    alertBanner.classList.remove('active');
+    stopBtn.disabled = true;
+    switchCamBtn.disabled = true;
+  }
+
+  startCamBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', () => {
+    stopAll();
+    overlayStatus.classList.remove('hidden');
+    statusText.textContent = 'Deteksi dihentikan.';
+  });
+  switchCamBtn.addEventListener('click', () => {
+    facingMode = facingMode === 'environment' ? 'user' : 'environment';
+    startCamera();
+  });
+
+  // ====== Upload Gambar & Video ======
+  document.getElementById('imageUpload').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    stopAll();
+    imgEl.onload = async () => {
+      overlayStatus.classList.add('hidden');
+      snapshotBtn.disabled = false;
+      await detectFrame(imgEl, imgEl.naturalWidth, imgEl.naturalHeight);
+      fpsPill.textContent = 'MODE: GAMBAR';
+    };
+    imgEl.src = URL.createObjectURL(file);
+  });
+
+  document.getElementById('videoUpload').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    stopAll();
+    video.src = URL.createObjectURL(file);
+    video.loop = true;
+    video.onloadeddata = () => {
+      overlayStatus.classList.add('hidden');
+      video.play();
+      isRunning = true;
+      stopBtn.disabled = false;
+      snapshotBtn.disabled = false;
+      processLoop();
+    };
+  });
+
+  // ====== Alarm Suara (Web Audio API) ======
+  function playBeep() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.35);
+    } catch (_) {}
+  }
+
+  // ====== Log Pelanggaran, Snapshot & Ekspor CSV ======
+  function recordViolation(count) {
+    const timeStr = new Date().toLocaleTimeString('id-ID');
+    const dateStr = new Date().toLocaleDateString('id-ID');
+    const thumb = canvas.toDataURL('image/jpeg', 0.65);
+    violationLogs.unshift({ date: dateStr, time: timeStr, count, thumb });
+    if (violationLogs.length > 30) violationLogs.pop();
+    renderLogs();
+  }
+
+  function renderLogs() {
+    const list = document.getElementById('logList');
+    document.getElementById('logCount').textContent = `${violationLogs.length} data`;
+    if (violationLogs.length === 0) {
+      list.innerHTML = '<div style="font-size:0.82rem; color:var(--text-muted); text-align:center; padding:1rem 0;">Belum ada pelanggaran tercatat.</div>';
+      return;
+    }
+    list.innerHTML = violationLogs.map((item, idx) => `
+      <div class="log-item">
+        <img src="${item.thumb}" alt="Bukti" title="Klik untuk unduh" onclick="downloadThumb(${idx})" />
+        <div class="log-meta">
+          <div><strong>${item.count} Orang Tanpa Helm</strong></div>
+          <div class="log-time">${item.date} • ${item.time}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  window.downloadThumb = (idx) => {
+    const a = document.createElement('a');
+    a.href = violationLogs[idx].thumb;
+    a.download = `pelanggaran-helm-${Date.now()}.jpg`;
+    a.click();
+  };
+
+  snapshotBtn.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `helmetguard-capture-${Date.now()}.png`;
+    a.click();
+  });
+
+  document.getElementById('exportCsvBtn').addEventListener('click', () => {
+    if (violationLogs.length === 0) return alert('Belum ada data log untuk diekspor.');
+    const rows = [['Tanggal', 'Waktu', 'Jumlah Tanpa Helm'], ...violationLogs.map(l => [l.date, l.time, l.count])];
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `log-pelanggaran-helm-${Date.now()}.csv`;
+    a.click();
+  });
+
+  document.getElementById('clearLogBtn').addEventListener('click', () => {
+    violationLogs = [];
+    renderLogs();
+  });
+
+  initAI();
+</script>
+</body>
+</html>
