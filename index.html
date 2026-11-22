@@ -400,7 +400,7 @@
     }
   }
 
-  // ====== Muat Model Custom (Teachable Machine / TFJS) ======
+// ====== Muat Model Custom (Teachable Machine / TFJS) ======
   async function loadCustomModel(rawUrl) {
     let url = rawUrl.trim();
     if (!url) return alert('Masukkan URL model Teachable Machine atau path folder ./model/');
@@ -411,22 +411,26 @@
     btn.textContent = 'Memuat Model...';
 
     try {
+      // 1. Cek apakah file model.json & metadata.json benar-benar ada (tidak 404)
+      const checkModel = await fetch(url + 'model.json');
+      if (!checkModel.ok) throw new Error(`File model.json tidak ditemukan (HTTP ${checkModel.status}) di ${url}model.json`);
+
+      const checkMeta = await fetch(url + 'metadata.json');
+      if (!checkMeta.ok) throw new Error(`File metadata.json tidak ditemukan (HTTP ${checkMeta.status}) di ${url}metadata.json`);
+
+      // 2. Muat model dengan Teachable Machine
       customHelmetModel = await tmImage.load(url + 'model.json', url + 'metadata.json');
       modeBadge.textContent = 'Mode AI Custom Aktif ✓';
       modeBadge.classList.add('custom');
-      alert('Model deteksi helm custom berhasil dimuat!');
+      alert('Berhasil! Model deteksi helm custom aktif.');
     } catch (err) {
-      alert('Gagal memuat model. Pastikan URL valid dan memiliki model.json & metadata.json.');
-      console.error(err);
+      alert('Gagal memuat model:\n' + err.message);
+      console.error('Detail error model:', err);
     } finally {
       btn.disabled = false;
       btn.textContent = 'Muat Model Custom';
     }
   }
-
-  document.getElementById('loadCustomBtn').addEventListener('click', () => {
-    loadCustomModel(document.getElementById('modelUrlInput').value);
-  });
 
   // ====== Klasifikasi Area Kepala ======
   async function classifyHeadRegion(sourceEl, bbox) {
